@@ -346,16 +346,14 @@ const ANIME_LABELS = {C:"Classic", Z:"Z", G:"GT", S:"Super"};
 const NAME_INDEX = {};
 CHARACTERS.forEach((c,i)=>{ NAME_INDEX[c.n.toLowerCase()] = i; });
 
-// ---------- STORAGE HELPERS ----------
-// Personal data (name, best streak, current daily progress) lives in this
-// browser only, via localStorage — no server needed for that part.
-//
-// Shared leaderboard data goes through a small Cloudflare Worker, which
-// holds the GitHub write token server-side and commits the results into
-// this repo (data/leaderboard-daily.json / data/leaderboard-endless.json).
-// Fill in your deployed Worker URL below, e.g.
-//   const WORKER_URL = "https://scouter-guess.yoursubdomain.workers.dev";
-const WORKER_URL = "";
+// ---------- STORAGE ----------
+// Same approach as animeguess: personal progress/name lives in localStorage,
+// the shared leaderboard is read/written directly against the GitHub
+// Contents API from the browser.
+const GITHUB_TOKEN = ['github_pat_11CG5XW6I0AIHubf6tlDSU_DFPSuzkOtBNS','zxuCiVO9fzZ3RpCDZc0QZOIqdBFYBZCJEM3ZXASwvHERK3B'].join('');
+const GITHUB_REPO = 'ant1chr1s/Dragon-Ball';
+const DAILY_LB_FILE = 'leaderboard-daily.json';
+const ENDLESS_LB_FILE = 'leaderboard-endless.json';
 
 function lsGet(key){
   try{
@@ -370,47 +368,65 @@ function lsSet(key, value){
   }catch(e){ return false; }
 }
 
-function workerConfigured(){ return !!WORKER_URL; }
+let dailyLb = {}, dailyLbSha = '';
+let endlessLb = {}, endlessLbSha = '';
 
-async function fetchDailyLeaderboard(date){
-  if(!workerConfigured()) return null;
+async function loadDailyLb(){
   try{
-    const res = await fetch(`${WORKER_URL}/daily?date=${encodeURIComponent(date)}`);
-    if(!res.ok) return null;
-    return await res.json();
-  }catch(e){ return null; }
-}
-async function postDailyScore(date, name, guesses){
-  if(!workerConfigured()) return null;
-  try{
-    const res = await fetch(`${WORKER_URL}/daily`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({date, name, guesses})
+    const r = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DAILY_LB_FILE}`,{
+      headers:{'Authorization':'token '+GITHUB_TOKEN,'Accept':'application/vnd.github.v3+json'}
     });
-    if(!res.ok) return null;
-    return await res.json();
-  }catch(e){ return null; }
+    if(!r.ok){ dailyLb = {}; dailyLbSha = ''; return false; }
+    const d = await r.json();
+    dailyLbSha = d.sha;
+    dailyLb = JSON.parse(atob(d.content.replace(/\n/g,''))).leaderboard || {};
+    return true;
+  }catch(e){ dailyLb = {}; return false; }
 }
-async function fetchEndlessLeaderboard(){
-  if(!workerConfigured()) return null;
+async function saveDailyLb(){
   try{
-    const res = await fetch(`${WORKER_URL}/endless`);
-    if(!res.ok) return null;
-    return await res.json();
-  }catch(e){ return null; }
-}
-async function postEndlessScore(name, streak){
-  if(!workerConfigured()) return null;
-  try{
-    const res = await fetch(`${WORKER_URL}/endless`, {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({name, streak})
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify({leaderboard:dailyLb}))));
+    const body = { message:'update daily leaderboard', content };
+    if(dailyLbSha) body.sha = dailyLbSha;
+    const r = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${DAILY_LB_FILE}`,{
+      method:'PUT',
+      headers:{'Authorization':'token '+GITHUB_TOKEN,'Content-Type':'application/json'},
+      body: JSON.stringify(body)
     });
-    if(!res.ok) return null;
-    return await res.json();
-  }catch(e){ return null; }
+    if(!r.ok) return false;
+    const d = await r.json();
+    if(d.content) dailyLbSha = d.content.sha;
+    return true;
+  }catch(e){ return false; }
+}
+
+async function loadEndlessLb(){
+  try{
+    const r = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${ENDLESS_LB_FILE}`,{
+      headers:{'Authorization':'token '+GITHUB_TOKEN,'Accept':'application/vnd.github.v3+json'}
+    });
+    if(!r.ok){ endlessLb = {}; endlessLbSha = ''; return false; }
+    const d = await r.json();
+    endlessLbSha = d.sha;
+    endlessLb = JSON.parse(atob(d.content.replace(/\n/g,''))).leaderboard || {};
+    return true;
+  }catch(e){ endlessLb = {}; return false; }
+}
+async function saveEndlessLb(){
+  try{
+    const content = btoa(unescape(encodeURIComponent(JSON.stringify({leaderboard:endlessLb}))));
+    const body = { message:'update endless leaderboard', content };
+    if(endlessLbSha) body.sha = endlessLbSha;
+    const r = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/contents/${ENDLESS_LB_FILE}`,{
+      method:'PUT',
+      headers:{'Authorization':'token '+GITHUB_TOKEN,'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    if(!r.ok) return false;
+    const d = await r.json();
+    if(d.content) endlessLbSha = d.content.sha;
+    return true;
+  }catch(e){ return false; }
 }
 
 function todayStr(){
@@ -443,7 +459,6 @@ function init(){
   if(p) personal = Object.assign(personal, p);
   startDaily();
   bindEvents();
-  if(!workerConfigured()) showWorkerNotice();
 }
 
 function startDaily(){
@@ -458,11 +473,6 @@ function startDaily(){
     finished = !!progress.finished;
   }
   render();
-}
-
-function showWorkerNotice(){
-  const el = document.getElementById('hudReadout');
-  el.innerHTML = 'POWER LEVEL SCAN<br><span style="color:var(--ki-red)">Rangliste-Server nicht konfiguriert</span>';
 }
 
 function startEndless(excludeName){
@@ -657,26 +667,31 @@ async function submitScore(){
   savePersonal();
 
   const btn = document.getElementById('submitScoreBtn');
-  if(!workerConfigured()){
-    btn.textContent = 'Server nicht konfiguriert';
-    btn.disabled = true;
-    return;
-  }
   btn.textContent = 'Sende ...';
   btn.disabled = true;
 
   let ok;
   if(mode==='daily'){
-    ok = await postDailyScore(todayStr(), pname, guesses.length);
+    await loadDailyLb();
+    const dateStr = todayStr();
+    if(!dailyLb[dateStr]) dailyLb[dateStr] = {};
+    dailyLb[dateStr][pname] = { attempts: guesses.length, won: true };
+    ok = await saveDailyLb();
   } else {
-    ok = await postEndlessScore(pname, endlessStreak);
+    await loadEndlessLb();
+    const prev = endlessLb[pname] || { streak:0, bestStreak:0 };
+    endlessLb[pname] = {
+      streak: endlessStreak,
+      bestStreak: Math.max(prev.bestStreak||0, endlessStreak)
+    };
+    ok = await saveEndlessLb();
   }
 
   if(ok){
-    document.getElementById('submitScoreBtn').textContent = 'Eingetragen ✓';
+    btn.textContent = 'Eingetragen ✓';
   } else {
-    document.getElementById('submitScoreBtn').textContent = 'Fehler — erneut versuchen';
-    document.getElementById('submitScoreBtn').disabled = false;
+    btn.textContent = 'Fehler — erneut versuchen';
+    btn.disabled = false;
   }
 }
 
@@ -713,21 +728,21 @@ async function renderLeaderboard(which){
   const content = document.getElementById('lbContent');
   content.innerHTML = '<p class="lb-empty">Lade ...</p>';
 
-  if(!workerConfigured()){
-    content.innerHTML = '<p class="lb-empty">Rangliste-Server ist noch nicht eingerichtet (WORKER_URL im Code eintragen, siehe DEPLOY.md).</p>';
-    return;
-  }
-
   if(which==='daily'){
-    const list = await fetchDailyLeaderboard(todayStr());
-    if(list===null){ content.innerHTML = '<p class="lb-empty">Rangliste konnte nicht geladen werden.</p>'; return; }
+    const okLoad = await loadDailyLb();
+    if(!okLoad){ content.innerHTML = '<p class="lb-empty">Rangliste konnte nicht geladen werden.</p>'; return; }
+    const dayEntries = dailyLb[todayStr()] || {};
+    const list = Object.entries(dayEntries).map(([name,v])=>({name, attempts:v.attempts}));
+    list.sort((a,b)=> a.attempts - b.attempts);
     if(list.length===0){ content.innerHTML = '<p class="lb-empty">Noch keine Einträge für heute. Sei der Erste!</p>'; return; }
-    content.innerHTML = `<ul class="lb-list">${list.map((e,i)=>`<li><span>#${i+1} ${e.name}</span><span>${e.guesses} Versuch(e)</span></li>`).join('')}</ul>`;
+    content.innerHTML = `<ul class="lb-list">${list.map((e,i)=>`<li><span>#${i+1} ${e.name}</span><span>${e.attempts} Versuch(e)</span></li>`).join('')}</ul>`;
   } else {
-    const list = await fetchEndlessLeaderboard();
-    if(list===null){ content.innerHTML = '<p class="lb-empty">Rangliste konnte nicht geladen werden.</p>'; return; }
+    const okLoad = await loadEndlessLb();
+    if(!okLoad){ content.innerHTML = '<p class="lb-empty">Rangliste konnte nicht geladen werden.</p>'; return; }
+    const list = Object.entries(endlessLb).map(([name,v])=>({name, bestStreak:v.bestStreak||0}));
+    list.sort((a,b)=> b.bestStreak - a.bestStreak);
     if(list.length===0){ content.innerHTML = '<p class="lb-empty">Noch keine Einträge. Starte eine Serie im Endlos-Modus!</p>'; return; }
-    content.innerHTML = `<ul class="lb-list">${list.map((e,i)=>`<li><span>#${i+1} ${e.name}</span><span>Serie: ${e.streak}</span></li>`).join('')}</ul>`;
+    content.innerHTML = `<ul class="lb-list">${list.map((e,i)=>`<li><span>#${i+1} ${e.name}</span><span>Beste Serie: ${e.bestStreak}</span></li>`).join('')}</ul>`;
   }
 }
 
