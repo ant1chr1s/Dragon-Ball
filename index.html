@@ -669,13 +669,14 @@ function evaluate(guess, tgt){
   // hair color
   res.hair = { status: guess.hc===tgt.hc?'correct':'wrong', label: guess.hc };
 
-  // transformation tier
+  // transformation
   let tStatus, tArrow='';
-  if(guess.tt === tgt.tt){
-    tStatus = (guess.t === tgt.t) ? 'correct' : 'partial';
+  if(guess.t === tgt.t){
+    tStatus = 'correct';
   } else {
-    tStatus = Math.abs(guess.tt-tgt.tt)<=1 ? 'partial' : 'wrong';
-    tArrow = guess.tt < tgt.tt ? '↑' : '↓';
+    tStatus = 'wrong';
+    if(guess.tt < tgt.tt) tArrow = '↑';
+    else if(guess.tt > tgt.tt) tArrow = '↓';
   }
   res.transform = { status: tStatus, label: guess.t, arrow: tArrow };
 
