@@ -333,7 +333,7 @@ const CHARACTERS = [
 {n:"Raditz", a:["Z"], r:"Saiyajin", g:"M", h:178, hc:"Schwarz", t:"Keine", tt:0, p:"Vegeta (zerstört)"},
 {n:"Dende", a:["Z","G","S"], r:"Namekianer", g:"M", h:132, hc:"Keine", t:"Keine", tt:0, p:"Namek"},
 {n:"Nail", a:["Z"], r:"Namekianer", g:"M", h:227, hc:"Keine", t:"Fusion mit Piccolo", tt:1, p:"Namek"},
-{n:"Jiren", a:["S"], r:"Unbekannt (Pride Trooper)", g:"M", h:210, hc:"Schwarz", t:"Volle Kraft", tt:9, p:"Universum 11"},
+{n:"Jiren", a:["S"], r:"Unbekannt (Pride Trooper)", g:"M", h:210, hc:"Keine (kahl)", t:"Volle Kraft", tt:9, p:"Universum 11"},
 {n:"Hit", a:["S"], r:"Unbekannt (Assassine)", g:"M", h:210, hc:"Weiß", t:"Zeitsprung-Modus", tt:6, p:"Universum 6"},
 {n:"Caulifla", a:["S"], r:"Saiyajin", g:"W", h:152, hc:"Schwarz", t:"Super Saiyan 2", tt:5, p:"Sadala (Universum 6)"},
 {n:"Kale", a:["S"], r:"Saiyajin", g:"W", h:152, hc:"Schwarz-Grün", t:"Super Saiyan (Berserker)", tt:7, p:"Sadala (Universum 6)"},
@@ -671,8 +671,9 @@ function evaluate(guess, tgt){
 
   // transformation tier
   let tStatus, tArrow='';
-  if(guess.tt === tgt.tt){ tStatus='correct'; }
-  else {
+  if(guess.tt === tgt.tt){
+    tStatus = (guess.t === tgt.t) ? 'correct' : 'partial';
+  } else {
     tStatus = Math.abs(guess.tt-tgt.tt)<=1 ? 'partial' : 'wrong';
     tArrow = guess.tt < tgt.tt ? '↑' : '↓';
   }
