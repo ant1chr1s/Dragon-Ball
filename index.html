@@ -122,6 +122,14 @@
     box-shadow:0 12px 30px rgba(0,0,0,0.5);
   }
   .suggestions.hidden{display:none;}
+  .anime-filters{
+    display:flex; gap:14px; flex-wrap:wrap; margin-top:8px;
+    font-family:'Chakra Petch', sans-serif; font-size:12px; color:var(--text-dim);
+  }
+  .anime-filters label{display:flex; align-items:center; gap:5px; cursor:pointer; user-select:none;}
+  .anime-filters input[type="checkbox"]{
+    accent-color:var(--scouter-blue); width:15px; height:15px; cursor:pointer;
+  }
   .sugg-item{padding:10px 14px; cursor:pointer; font-size:14px; display:flex; justify-content:space-between; color:var(--text);}
   .sugg-item:hover, .sugg-item.active{background:rgba(51,209,255,0.12);}
   .sugg-item span.tag{color:var(--text-dim); font-size:12px;}
@@ -249,6 +257,12 @@
 
     <div class="search-wrap">
       <input type="text" id="guessInput" placeholder="Charakter oder Anime (Classic/Z/GT/Super) ..." autocomplete="off">
+      <div class="anime-filters">
+        <label><input type="checkbox" class="anime-filter-cb" id="filterC" value="C"> Classic</label>
+        <label><input type="checkbox" class="anime-filter-cb" id="filterZ" value="Z"> Z</label>
+        <label><input type="checkbox" class="anime-filter-cb" id="filterG" value="G"> GT</label>
+        <label><input type="checkbox" class="anime-filter-cb" id="filterS" value="S"> Super</label>
+      </div>
       <div class="suggestions hidden" id="suggestions"></div>
     </div>
 
@@ -937,25 +951,53 @@ function matchAnimeCodes(q){
   return codes;
 }
 
+function getSelectedAnimeFilters(){
+  const codes = [];
+  ['filterC','filterZ','filterG','filterS'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el && el.checked) codes.push(el.value);
+  });
+  return codes;
+}
+function animeSetMatches(charAnime, selected){
+  if(selected.length===0) return true;
+  if(charAnime.length !== selected.length) return false;
+  const setA = new Set(charAnime);
+  return selected.every(code => setA.has(code));
+}
+
 function renderSuggestions(query){
   const box = document.getElementById('suggestions');
   const q = query.trim().toLowerCase();
-  if(!q){ box.classList.add('hidden'); box.innerHTML=''; return; }
   const guessedNames = new Set(guesses.map(g=>g.n));
-  const animeCodes = matchAnimeCodes(q);
+  const selectedFilters = getSelectedAnimeFilters();
+
+  if(!q && selectedFilters.length===0){ box.classList.add('hidden'); box.innerHTML=''; return; }
+
+  let pool = CHARACTERS.filter(c => animeSetMatches(c.a, selectedFilters) && !guessedNames.has(c.n));
 
   let matches;
-  if(animeCodes.size>0){
-    const animeMatches = CHARACTERS.filter(c => c.a.some(code=>animeCodes.has(code)) && !guessedNames.has(c.n));
-    const nameMatches = CHARACTERS.filter(c => c.n.toLowerCase().includes(q) && !guessedNames.has(c.n));
-    const merged = new Map();
-    [...animeMatches, ...nameMatches].forEach(c => merged.set(c.n, c));
-    matches = [...merged.values()].slice(0,30);
+  if(q){
+    const animeCodes = matchAnimeCodes(q);
+    if(animeCodes.size>0){
+      const animeMatches = pool.filter(c => c.a.some(code=>animeCodes.has(code)));
+      const nameMatches = pool.filter(c => c.n.toLowerCase().includes(q));
+      const merged = new Map();
+      [...animeMatches, ...nameMatches].forEach(c => merged.set(c.n, c));
+      matches = [...merged.values()];
+    } else {
+      matches = pool.filter(c => c.n.toLowerCase().includes(q));
+    }
   } else {
-    matches = CHARACTERS.filter(c => c.n.toLowerCase().includes(q) && !guessedNames.has(c.n)).slice(0,8);
+    matches = pool;
   }
+  matches = matches.slice(0, 40);
 
-  if(matches.length===0){ box.classList.add('hidden'); box.innerHTML=''; return; }
+  if(matches.length===0){
+    box.innerHTML = '<div class="sugg-item" style="cursor:default;color:var(--text-dim)">Keine Treffer</div>';
+    box.classList.remove('hidden');
+    return;
+  }
   box.innerHTML = matches.map(c => `<div class="sugg-item" data-name="${c.n}">${c.n} <span class="tag">${c.a.map(x=>ANIME_LABELS[x]).join('/')}</span></div>`).join('');
   box.classList.remove('hidden');
   box.querySelectorAll('.sugg-item').forEach(el=>{
@@ -1047,6 +1089,9 @@ function bindEvents(){
       const q = input.value.trim().toLowerCase();
       if(NAME_INDEX[q]!==undefined){ submitGuess(input.value); }
     }
+  });
+  document.querySelectorAll('.anime-filter-cb').forEach(cb=>{
+    cb.addEventListener('change', ()=> renderSuggestions(input.value));
   });
   document.addEventListener('click', (e)=>{
     if(!e.target.closest('.search-wrap')) hideSuggestions();
