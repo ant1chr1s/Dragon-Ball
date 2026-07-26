@@ -201,6 +201,19 @@
   .lb-list li{display:flex; justify-content:space-between; padding:8px 6px; border-bottom:1px solid var(--panel-line);}
   .lb-list li:first-child{color:var(--ki-gold);}
   .lb-empty{color:var(--text-dim); font-size:13px; padding:10px 0;}
+  .player-badge{cursor:pointer; color:var(--scouter-blue); text-decoration:underline dotted; font-size:11px;}
+  .player-badge:hover{color:var(--ki-gold);}
+
+  .cat-overview{display:flex; gap:6px; flex-wrap:wrap; margin:12px 0;}
+  .cat-pill{
+    font-family:'Share Tech Mono', monospace; font-size:10.5px; letter-spacing:0.3px;
+    padding:5px 10px; border-radius:20px; border:1px solid var(--panel-line);
+    color:var(--text-dim); background:var(--void-2); transition:all .2s ease;
+  }
+  .cat-pill.solved{
+    color:var(--namek-green); border-color:rgba(57,217,122,0.5);
+    background:rgba(57,217,122,0.12); box-shadow:0 0 8px rgba(57,217,122,0.15);
+  }
 
   @media (max-width:640px){
     .hud-top{flex-direction:column; align-items:flex-start;}
@@ -219,7 +232,8 @@
       </div>
       <div class="hud-readout" id="hudReadout">
         POWER LEVEL SCAN<br>
-        <span id="hudStatus">BEREIT ...</span>
+        <span id="hudStatus">BEREIT ...</span><br>
+        <span id="playerBadge" class="player-badge"></span>
       </div>
     </div>
   </header>
@@ -234,9 +248,11 @@
     <div class="status-row" id="statusRow"></div>
 
     <div class="search-wrap">
-      <input type="text" id="guessInput" placeholder="Charakternamen eingeben ..." autocomplete="off">
+      <input type="text" id="guessInput" placeholder="Charakter oder Anime (Classic/Z/GT/Super) ..." autocomplete="off">
       <div class="suggestions hidden" id="suggestions"></div>
     </div>
+
+    <div class="cat-overview" id="catOverview"></div>
 
     <div class="actions-row">
       <button class="ghost-btn" id="giveUpBtn">Aufgeben / Auflösen</button>
@@ -601,15 +617,26 @@ let mode = 'daily';
 let target = null;
 let guesses = []; // array of character objects
 let finished = false;
-let endlessStreak = 0;
-let personal = { bestEndlessStreak:0, playerName:'', dailyDone:{} };
+let personal = { playerName:'' };
+let myEndlessStats = { wins:0, losses:0, streak:0, bestStreak:0, bestAttempts:999 };
+let recordingState = 'idle'; // idle | saving | done | error
 
 // ---------- INIT ----------
 function init(){
   const p = lsGet('dbg-personal');
   if(p) personal = Object.assign(personal, p);
+  if(!personal.playerName){
+    personal.playerName = 'Krieger' + Math.floor(1000 + Math.random()*9000);
+    savePersonal();
+  }
   startDaily();
   bindEvents();
+  renderPlayerBadge();
+}
+
+function renderPlayerBadge(){
+  const el = document.getElementById('playerBadge');
+  if(el) el.textContent = '👤 ' + personal.playerName + ' (ändern)';
 }
 
 function startDaily(){
@@ -634,6 +661,16 @@ function startEndless(excludeName){
   if(excludeName) pool = CHARACTERS.filter(c=>c.n!==excludeName);
   target = pool[Math.floor(Math.random()*pool.length)];
   render();
+  refreshEndlessStats();
+}
+
+async function refreshEndlessStats(){
+  const okLoad = await loadEndlessLb();
+  if(okLoad){
+    const s = endlessLb[personal.playerName];
+    myEndlessStats = s ? Object.assign({wins:0,losses:0,streak:0,bestStreak:0,bestAttempts:999}, s) : {wins:0,losses:0,streak:0,bestStreak:0,bestAttempts:999};
+  }
+  renderStatus();
 }
 
 // ---------- EVALUATION ----------
@@ -696,8 +733,26 @@ function evaluate(guess, tgt){
 function render(){
   renderStatus();
   renderTable();
+  renderCategoryOverview();
   renderWinBanner();
   document.getElementById('newEndlessBtn').style.display = (mode==='endless') ? 'inline-block' : 'none';
+}
+
+const CATEGORY_LABELS = { anime:'Anime', race:'Rasse', gender:'Geschlecht', height:'Größe', hair:'Haarfarbe', transform:'Transformation', planet:'Heimatplanet' };
+
+function renderCategoryOverview(){
+  const el = document.getElementById('catOverview');
+  if(!target || guesses.length===0){ el.innerHTML=''; return; }
+  const solved = {};
+  guesses.forEach(g=>{
+    const res = evaluate(g, target);
+    Object.keys(CATEGORY_LABELS).forEach(k=>{
+      if(res[k].status==='correct') solved[k] = true;
+    });
+  });
+  el.innerHTML = Object.entries(CATEGORY_LABELS).map(([k,label])=>
+    `<span class="cat-pill ${solved[k]?'solved':''}">${solved[k]?'✓':'•'} ${label}</span>`
+  ).join('');
 }
 
 function renderStatus(){
@@ -706,7 +761,7 @@ function renderStatus(){
   if(mode==='daily'){
     el.innerHTML = `<span>Datum: <b>${todayStr()}</b></span><span>Versuche: <b>${guesses.length}</b></span>`;
   } else {
-    el.innerHTML = `<span>Aktuelle Serie: <b>${endlessStreak}</b></span><span>Beste Serie: <b>${personal.bestEndlessStreak}</b></span><span>Versuche: <b>${guesses.length}</b></span>`;
+    el.innerHTML = `<span>Serie: <b>${myEndlessStats.streak}</b></span><span>Beste Serie: <b>${myEndlessStats.bestStreak}</b></span><span>${myEndlessStats.wins}S / ${myEndlessStats.losses}N</span><span>Versuche: <b>${guesses.length}</b></span>`;
   }
   hud.textContent = finished ? 'ZIEL ERFASST' : 'SCAN AKTIV ...';
 }
@@ -742,22 +797,23 @@ function renderWinBanner(){
   const el = document.getElementById('winBanner');
   if(!finished){ el.innerHTML=''; return; }
   const won = guesses.length>0 && evaluate(guesses[guesses.length-1], target).win;
+  const savingLine = recordingState==='saving' ? '<p class="lb-empty">Ergebnis wird auf der Rangliste vermerkt ...</p>'
+    : recordingState==='error' ? '<p class="lb-empty">Rangliste konnte nicht aktualisiert werden.</p>'
+    : recordingState==='done' ? '<p class="lb-empty">✓ Auf der Rangliste vermerkt.</p>'
+    : '';
   if(won){
     el.innerHTML = `
       <div class="win-banner">
         <h2>⚡ Power Level bestätigt! Es ist ${target.n}!</h2>
         <p>Erraten in ${guesses.length} Versuch(en).</p>
-        <div class="name-submit">
-          <input type="text" id="nameInput" placeholder="Dein Name" value="${personal.playerName||''}">
-          <button class="primary-btn" id="submitScoreBtn">Auf Rangliste eintragen</button>
-        </div>
+        ${savingLine}
       </div>`;
-    document.getElementById('submitScoreBtn').addEventListener('click', submitScore);
   } else {
     el.innerHTML = `
       <div class="win-banner">
         <h2>Aufgelöst: ${target.n}</h2>
         <p>Versuche es beim nächsten Mal!</p>
+        ${savingLine}
       </div>`;
   }
 }
@@ -775,13 +831,8 @@ async function submitGuess(name){
 
   if(res.win){
     finished = true;
-    if(mode==='endless'){
-      endlessStreak++;
-      if(endlessStreak > personal.bestEndlessStreak) personal.bestEndlessStreak = endlessStreak;
-      savePersonal();
-    } else {
-      lsSet('dbg-daily-progress:'+todayStr(), {guesses:guesses.map(c=>c.n), finished:true, won:true});
-    }
+    render();
+    await finishRound(true);
   } else {
     if(mode==='daily'){
       lsSet('dbg-daily-progress:'+todayStr(), {guesses:guesses.map(c=>c.n), finished:false});
@@ -790,22 +841,27 @@ async function submitGuess(name){
   render();
 }
 
+async function finishRound(won){
+  recordingState = 'saving';
+  if(mode==='endless'){
+    await recordEndlessResult(won);
+  } else {
+    lsSet('dbg-daily-progress:'+todayStr(), {guesses:guesses.map(c=>c.n), finished:true, won});
+    await recordDailyResult(won);
+  }
+}
+
 function flashInputError(){
   const inp = document.getElementById('guessInput');
   inp.style.borderColor = 'var(--ki-red)';
   setTimeout(()=>{ inp.style.borderColor=''; }, 500);
 }
 
-function giveUp(){
+async function giveUp(){
   if(finished) return;
   finished = true;
-  if(mode==='endless'){
-    if(endlessStreak > personal.bestEndlessStreak) personal.bestEndlessStreak = endlessStreak;
-    endlessStreak = 0;
-    savePersonal();
-  } else {
-    lsSet('dbg-daily-progress:'+todayStr(), {guesses:guesses.map(c=>c.n), finished:true, won:false});
-  }
+  render();
+  await finishRound(false);
   render();
 }
 
@@ -813,48 +869,90 @@ function savePersonal(){
   lsSet('dbg-personal', personal);
 }
 
-async function submitScore(){
-  const nameInput = document.getElementById('nameInput');
-  const pname = (nameInput.value || 'Namenloser Krieger').trim().slice(0,24);
-  personal.playerName = pname;
-  savePersonal();
-
-  const btn = document.getElementById('submitScoreBtn');
-  btn.textContent = 'Sende ...';
-  btn.disabled = true;
-
-  let ok;
-  if(mode==='daily'){
-    await loadDailyLb();
-    const dateStr = todayStr();
-    if(!dailyLb[dateStr]) dailyLb[dateStr] = {};
-    dailyLb[dateStr][pname] = { attempts: guesses.length, won: true };
-    ok = await saveDailyLb();
-  } else {
-    await loadEndlessLb();
-    const prev = endlessLb[pname] || { streak:0, bestStreak:0 };
-    endlessLb[pname] = {
-      streak: endlessStreak,
-      bestStreak: Math.max(prev.bestStreak||0, endlessStreak)
-    };
-    ok = await saveEndlessLb();
+function getDailyStreak(name){
+  let streak = 0;
+  const today = new Date();
+  for(let i=0;i<365;i++){
+    const d = new Date(today);
+    d.setDate(d.getDate()-i);
+    const dateStr = d.toISOString().slice(0,10);
+    const dayData = dailyLb[dateStr];
+    if(dayData && dayData[name] && dayData[name].won){
+      streak++;
+    } else if(i>0){
+      break;
+    }
   }
+  return streak;
+}
 
+async function recordDailyResult(won){
+  const okLoad = await loadDailyLb();
+  if(!okLoad){ recordingState = 'error'; return; }
+  const dateStr = todayStr();
+  if(!dailyLb[dateStr]) dailyLb[dateStr] = {};
+  const streak = won ? getDailyStreak(personal.playerName) + 1 : 0;
+  dailyLb[dateStr][personal.playerName] = { attempts: guesses.length, won, streak };
+  const ok = await saveDailyLb();
+  recordingState = ok ? 'done' : 'error';
+}
+
+async function recordEndlessResult(won){
+  const okLoad = await loadEndlessLb();
+  if(!okLoad){ recordingState = 'error'; return; }
+  const prev = endlessLb[personal.playerName] || { wins:0, losses:0, streak:0, bestStreak:0, bestAttempts:999 };
+  const newStreak = won ? (prev.streak||0)+1 : 0;
+  endlessLb[personal.playerName] = {
+    wins: (prev.wins||0) + (won?1:0),
+    losses: (prev.losses||0) + (won?0:1),
+    streak: newStreak,
+    bestStreak: Math.max(prev.bestStreak||0, newStreak),
+    bestAttempts: won ? Math.min(prev.bestAttempts||999, guesses.length) : (prev.bestAttempts||999)
+  };
+  const ok = await saveEndlessLb();
   if(ok){
-    btn.textContent = 'Eingetragen ✓';
+    myEndlessStats = endlessLb[personal.playerName];
+    recordingState = 'done';
   } else {
-    btn.textContent = 'Fehler — erneut versuchen';
-    btn.disabled = false;
+    recordingState = 'error';
   }
 }
 
 // ---------- SUGGESTIONS ----------
+const ANIME_ALIASES = [
+  {code:'C', keys:['classic','klassiker','dragon ball','db']},
+  {code:'Z', keys:['z','dbz','dragon ball z']},
+  {code:'G', keys:['gt','dbgt','dragon ball gt']},
+  {code:'S', keys:['super','dbs','dragon ball super']},
+];
+function matchAnimeCodes(q){
+  const codes = new Set();
+  ANIME_ALIASES.forEach(entry=>{
+    entry.keys.forEach(k=>{
+      if(k===q || (q.length>=2 && k.startsWith(q))) codes.add(entry.code);
+    });
+  });
+  return codes;
+}
+
 function renderSuggestions(query){
   const box = document.getElementById('suggestions');
   const q = query.trim().toLowerCase();
   if(!q){ box.classList.add('hidden'); box.innerHTML=''; return; }
   const guessedNames = new Set(guesses.map(g=>g.n));
-  const matches = CHARACTERS.filter(c => c.n.toLowerCase().includes(q) && !guessedNames.has(c.n)).slice(0,8);
+  const animeCodes = matchAnimeCodes(q);
+
+  let matches;
+  if(animeCodes.size>0){
+    const animeMatches = CHARACTERS.filter(c => c.a.some(code=>animeCodes.has(code)) && !guessedNames.has(c.n));
+    const nameMatches = CHARACTERS.filter(c => c.n.toLowerCase().includes(q) && !guessedNames.has(c.n));
+    const merged = new Map();
+    [...animeMatches, ...nameMatches].forEach(c => merged.set(c.n, c));
+    matches = [...merged.values()].slice(0,30);
+  } else {
+    matches = CHARACTERS.filter(c => c.n.toLowerCase().includes(q) && !guessedNames.has(c.n)).slice(0,8);
+  }
+
   if(matches.length===0){ box.classList.add('hidden'); box.innerHTML=''; return; }
   box.innerHTML = matches.map(c => `<div class="sugg-item" data-name="${c.n}">${c.n} <span class="tag">${c.a.map(x=>ANIME_LABELS[x]).join('/')}</span></div>`).join('');
   box.classList.remove('hidden');
@@ -880,22 +978,38 @@ async function renderLeaderboard(which){
   document.getElementById('lbTabEndless').classList.toggle('active', which==='endless');
   const content = document.getElementById('lbContent');
   content.innerHTML = '<p class="lb-empty">Lade ...</p>';
+  const medals = ['🥇','🥈','🥉'];
 
   if(which==='daily'){
     const okLoad = await loadDailyLb();
     if(!okLoad){ content.innerHTML = '<p class="lb-empty">Rangliste konnte nicht geladen werden.</p>'; return; }
     const dayEntries = dailyLb[todayStr()] || {};
-    const list = Object.entries(dayEntries).map(([name,v])=>({name, attempts:v.attempts}));
-    list.sort((a,b)=> a.attempts - b.attempts);
-    if(list.length===0){ content.innerHTML = '<p class="lb-empty">Noch keine Einträge für heute. Sei der Erste!</p>'; return; }
-    content.innerHTML = `<ul class="lb-list">${list.map((e,i)=>`<li><span>#${i+1} ${e.name}</span><span>${e.attempts} Versuch(e)</span></li>`).join('')}</ul>`;
+    const winners = Object.entries(dayEntries)
+      .filter(([,v])=>v.won)
+      .map(([name,v])=>({name, attempts:v.attempts, streak:v.streak||0}));
+    winners.sort((a,b)=> a.attempts - b.attempts);
+    const losers = Object.entries(dayEntries).filter(([,v])=>!v.won).map(([name])=>name);
+
+    let html = '';
+    if(winners.length===0){
+      html += '<p class="lb-empty">Noch keine Einträge für heute. Sei der Erste!</p>';
+    } else {
+      html += `<ul class="lb-list">${winners.map((e,i)=>`<li><span>${medals[i]||('#'+(i+1))} ${e.name}${e.name===personal.playerName?' (Du)':''}</span><span>${e.attempts} Versuch(e)${e.streak>1?' · 🔥'+e.streak+' Tage':''}</span></li>`).join('')}</ul>`;
+    }
+    if(losers.length>0){
+      html += `<p class="lb-empty">Aufgegeben: ${losers.join(', ')}</p>`;
+    }
+    content.innerHTML = html;
   } else {
     const okLoad = await loadEndlessLb();
     if(!okLoad){ content.innerHTML = '<p class="lb-empty">Rangliste konnte nicht geladen werden.</p>'; return; }
-    const list = Object.entries(endlessLb).map(([name,v])=>({name, bestStreak:v.bestStreak||0}));
-    list.sort((a,b)=> b.bestStreak - a.bestStreak);
+    const list = Object.entries(endlessLb).map(([name,v])=>({name, ...v}));
+    list.sort((a,b)=>{
+      if((b.streak||0) !== (a.streak||0)) return (b.streak||0) - (a.streak||0);
+      return (b.wins||0) - (a.wins||0);
+    });
     if(list.length===0){ content.innerHTML = '<p class="lb-empty">Noch keine Einträge. Starte eine Serie im Endlos-Modus!</p>'; return; }
-    content.innerHTML = `<ul class="lb-list">${list.map((e,i)=>`<li><span>#${i+1} ${e.name}</span><span>Beste Serie: ${e.bestStreak}</span></li>`).join('')}</ul>`;
+    content.innerHTML = `<ul class="lb-list">${list.map((e,i)=>`<li><span>${medals[i]||('#'+(i+1))} ${e.name}${e.name===personal.playerName?' (Du)':''}</span><span>🔥${e.streak||0} · Beste ${e.bestStreak||0} · ${e.wins||0}S/${e.losses||0}N</span></li>`).join('')}</ul>`;
   }
 }
 
@@ -907,13 +1021,22 @@ function bindEvents(){
   });
   document.getElementById('tabEndless').addEventListener('click', ()=>{
     setTabActive('endless');
-    endlessStreak = 0;
     startEndless();
   });
   document.getElementById('newEndlessBtn').addEventListener('click', ()=>{
     startEndless(target ? target.n : null);
   });
   document.getElementById('giveUpBtn').addEventListener('click', giveUp);
+
+  document.getElementById('playerBadge').addEventListener('click', ()=>{
+    const newName = window.prompt('Dein Name für die Rangliste:', personal.playerName);
+    if(newName && newName.trim()){
+      personal.playerName = newName.trim().slice(0,24);
+      savePersonal();
+      renderPlayerBadge();
+      if(mode==='endless') refreshEndlessStats();
+    }
+  });
 
   const input = document.getElementById('guessInput');
   input.addEventListener('input', (e)=> renderSuggestions(e.target.value));
