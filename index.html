@@ -686,10 +686,12 @@ function evaluate(guess, tgt){
   let raceStatus = 'wrong';
   if(guess.r === tgt.r) raceStatus = 'correct';
   else {
+    const raceBase = r => r.split('(')[0].trim();
     const bothSaiyanBlood = guess.r.includes('Saiyajin') && tgt.r.includes('Saiyajin');
     const bothNamek = guess.r.includes('Namek') && tgt.r.includes('Namek');
     const bothMensch = guess.r.includes('Mensch') && tgt.r.includes('Mensch');
-    if(bothSaiyanBlood || bothNamek || bothMensch) raceStatus = 'partial';
+    const sameBase = raceBase(guess.r) === raceBase(tgt.r);
+    if(bothSaiyanBlood || bothNamek || bothMensch || sameBase) raceStatus = 'partial';
   }
   res.race = { status: raceStatus, label: guess.r };
 
