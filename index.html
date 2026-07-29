@@ -614,8 +614,19 @@ function todayStr(){
   return new Date().toISOString().slice(0,10);
 }
 function seededIndex(str, len){
-  let h = 0;
-  for(let i=0;i<str.length;i++){ h = (h*31 + str.charCodeAt(i)) >>> 0; }
+  // FNV-1a hash: every character (including the last) strongly affects the
+  // whole 32-bit state via multiply+xor, so consecutive dates (which only
+  // differ in their last digit) still land far apart in the list.
+  let h = 0x811c9dc5;
+  for(let i=0;i<str.length;i++){
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  h = h >>> 0;
+  // extra avalanche round for good measure
+  h ^= h >>> 16;
+  h = Math.imul(h, 0x85ebca6b) >>> 0;
+  h = (h ^ (h >>> 13)) >>> 0;
   return h % len;
 }
 function avatarColor(name){
