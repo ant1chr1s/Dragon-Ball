@@ -611,7 +611,8 @@ async function saveEndlessLb(){
 }
 
 function todayStr(){
-  return new Date().toISOString().slice(0,10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 function seededIndex(str, len){
   // FNV-1a hash: every character (including the last) strongly affects the
