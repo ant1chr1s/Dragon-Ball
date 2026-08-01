@@ -209,6 +209,9 @@
   .lb-list li{display:flex; justify-content:space-between; padding:8px 6px; border-bottom:1px solid var(--panel-line);}
   .lb-list li:first-child{color:var(--ki-gold);}
   .lb-empty{color:var(--text-dim); font-size:13px; padding:10px 0;}
+  .result-modal h2{color:var(--ki-gold); text-shadow:0 0 12px rgba(255,213,74,0.4);}
+  .result-modal p{color:var(--text-dim); font-size:13px; line-height:1.6;}
+  .result-modal-actions{display:flex; gap:10px; flex-wrap:wrap; margin-top:14px;}
   .player-badge{cursor:pointer; color:var(--scouter-blue); text-decoration:underline dotted; font-size:11px;}
   .player-badge:hover{color:var(--ki-gold);}
 
@@ -311,6 +314,15 @@
       <div class="lb-tab" data-lbtab="endless" id="lbTabEndless">Endlos (Beste Serien)</div>
     </div>
     <div id="lbContent"><p class="lb-empty">Lade ...</p></div>
+  </div>
+</div>
+
+<div class="modal-backdrop hidden" id="resultModal">
+  <div class="modal result-modal">
+    <button class="modal-close" id="closeResultModal">✕</button>
+    <h2 id="resultModalTitle"></h2>
+    <p id="resultModalBody"></p>
+    <div class="result-modal-actions" id="resultModalActions"></div>
   </div>
 </div>
 
@@ -685,6 +697,7 @@ let finished = false;
 let personal = { playerName:'' };
 let myEndlessStats = { wins:0, losses:0, streak:0, bestStreak:0, bestAttempts:999 };
 let recordingState = 'idle'; // idle | saving | done | error
+let resultModalDismissed = false;
 
 // ---------- INIT ----------
 function init(){
@@ -715,6 +728,9 @@ function startDaily(){
     guesses = progress.guesses.map(n => CHARACTERS[NAME_INDEX[n.toLowerCase()]]).filter(Boolean);
     finished = !!progress.finished;
   }
+  // don't pop the modal again on a page reload for a round already finished earlier
+  resultModalDismissed = finished;
+  document.getElementById('resultModal').classList.add('hidden');
   render();
 }
 
@@ -722,6 +738,8 @@ function startEndless(excludeName){
   mode = 'endless';
   finished = false;
   guesses = [];
+  resultModalDismissed = false;
+  document.getElementById('resultModal').classList.add('hidden');
   let pool = CHARACTERS;
   if(excludeName) pool = CHARACTERS.filter(c=>c.n!==excludeName);
   target = pool[Math.floor(Math.random()*pool.length)];
@@ -802,6 +820,9 @@ function render(){
   renderTable();
   renderCategoryOverview();
   renderWinBanner();
+  if(finished && !resultModalDismissed){
+    showResultModal();
+  }
   document.getElementById('newEndlessBtn').style.display = (mode==='endless') ? 'inline-block' : 'none';
 }
 
@@ -882,6 +903,52 @@ function renderWinBanner(){
         <p>Versuche es beim nächsten Mal!</p>
         ${savingLine}
       </div>`;
+  }
+}
+
+function showResultModal(){
+  const won = guesses.length>0 && evaluate(guesses[guesses.length-1], target).win;
+  const backdrop = document.getElementById('resultModal');
+  const title = document.getElementById('resultModalTitle');
+  const body = document.getElementById('resultModalBody');
+  const actions = document.getElementById('resultModalActions');
+
+  const savingLine = recordingState==='saving' ? 'Ergebnis wird auf der Rangliste vermerkt ...'
+    : recordingState==='error' ? 'Rangliste konnte nicht aktualisiert werden.'
+    : recordingState==='done' ? '✓ Auf der Rangliste vermerkt.'
+    : '';
+
+  if(won){
+    title.textContent = `⚡ Richtig! Es ist ${target.n}!`;
+    body.innerHTML = `Erraten in ${guesses.length} Versuch(en).<br>${savingLine}`;
+  } else {
+    title.textContent = `Aufgelöst: ${target.n}`;
+    body.innerHTML = `Versuch's beim nächsten Mal!<br>${savingLine}`;
+  }
+
+  if(mode==='endless'){
+    actions.innerHTML = `<button class="primary-btn orange" id="modalNewGameBtn">🔄 Neues Spiel</button><button class="ghost-btn" id="modalCloseBtn">Schließen</button>`;
+  } else {
+    actions.innerHTML = `<button class="primary-btn" id="modalLbBtn">🏆 Rangliste</button><button class="ghost-btn" id="modalCloseBtn">Schließen</button>`;
+  }
+
+  backdrop.classList.remove('hidden');
+
+  document.getElementById('modalCloseBtn').addEventListener('click', ()=>{
+    resultModalDismissed = true;
+    backdrop.classList.add('hidden');
+  });
+  if(mode==='endless'){
+    document.getElementById('modalNewGameBtn').addEventListener('click', ()=>{
+      backdrop.classList.add('hidden');
+      startEndless(target.n);
+    });
+  } else {
+    document.getElementById('modalLbBtn').addEventListener('click', ()=>{
+      resultModalDismissed = true;
+      backdrop.classList.add('hidden');
+      openLeaderboard('daily');
+    });
   }
 }
 
@@ -1153,6 +1220,17 @@ function bindEvents(){
   document.getElementById('lbModal').addEventListener('click', (e)=>{ if(e.target.id==='lbModal') closeLeaderboard(); });
   document.getElementById('lbTabDaily').addEventListener('click', ()=> renderLeaderboard('daily'));
   document.getElementById('lbTabEndless').addEventListener('click', ()=> renderLeaderboard('endless'));
+
+  document.getElementById('closeResultModal').addEventListener('click', ()=>{
+    resultModalDismissed = true;
+    document.getElementById('resultModal').classList.add('hidden');
+  });
+  document.getElementById('resultModal').addEventListener('click', (e)=>{
+    if(e.target.id==='resultModal'){
+      resultModalDismissed = true;
+      document.getElementById('resultModal').classList.add('hidden');
+    }
+  });
 }
 
 function setTabActive(m){
