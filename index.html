@@ -1003,13 +1003,17 @@ function savePersonal(){
   lsSet('dbg-personal', personal);
 }
 
+function localDateStr(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 function getDailyStreak(name){
   let streak = 0;
   const today = new Date();
   for(let i=0;i<365;i++){
     const d = new Date(today);
     d.setDate(d.getDate()-i);
-    const dateStr = d.toISOString().slice(0,10);
+    const dateStr = localDateStr(d);
     const dayData = dailyLb[dateStr];
     if(dayData && dayData[name] && dayData[name].won){
       streak++;
@@ -1020,30 +1024,52 @@ function getDailyStreak(name){
   return streak;
 }
 
+// Retries the load -> mutate -> save cycle with a fresh reload each time,
+// so a concurrent write from another player (stale sha / 409 conflict)
+// doesn't silently drop this result — we just re-merge onto the latest data.
+async function withDailyLbUpdate(mutatorFn, maxRetries=3){
+  for(let attempt=0; attempt<maxRetries; attempt++){
+    const okLoad = await loadDailyLb();
+    if(!okLoad) continue;
+    mutatorFn(dailyLb);
+    const ok = await saveDailyLb();
+    if(ok) return true;
+  }
+  return false;
+}
+async function withEndlessLbUpdate(mutatorFn, maxRetries=3){
+  for(let attempt=0; attempt<maxRetries; attempt++){
+    const okLoad = await loadEndlessLb();
+    if(!okLoad) continue;
+    mutatorFn(endlessLb);
+    const ok = await saveEndlessLb();
+    if(ok) return true;
+  }
+  return false;
+}
+
 async function recordDailyResult(won){
-  const okLoad = await loadDailyLb();
-  if(!okLoad){ recordingState = 'error'; return; }
   const dateStr = todayStr();
-  if(!dailyLb[dateStr]) dailyLb[dateStr] = {};
-  const streak = won ? getDailyStreak(personal.playerName) + 1 : 0;
-  dailyLb[dateStr][personal.playerName] = { attempts: guesses.length, won, streak };
-  const ok = await saveDailyLb();
+  const ok = await withDailyLbUpdate((lb)=>{
+    if(!lb[dateStr]) lb[dateStr] = {};
+    const streak = won ? getDailyStreak(personal.playerName) + 1 : 0;
+    lb[dateStr][personal.playerName] = { attempts: guesses.length, won, streak };
+  });
   recordingState = ok ? 'done' : 'error';
 }
 
 async function recordEndlessResult(won){
-  const okLoad = await loadEndlessLb();
-  if(!okLoad){ recordingState = 'error'; return; }
-  const prev = endlessLb[personal.playerName] || { wins:0, losses:0, streak:0, bestStreak:0, bestAttempts:999 };
-  const newStreak = won ? (prev.streak||0)+1 : 0;
-  endlessLb[personal.playerName] = {
-    wins: (prev.wins||0) + (won?1:0),
-    losses: (prev.losses||0) + (won?0:1),
-    streak: newStreak,
-    bestStreak: Math.max(prev.bestStreak||0, newStreak),
-    bestAttempts: won ? Math.min(prev.bestAttempts||999, guesses.length) : (prev.bestAttempts||999)
-  };
-  const ok = await saveEndlessLb();
+  const ok = await withEndlessLbUpdate((lb)=>{
+    const prev = lb[personal.playerName] || { wins:0, losses:0, streak:0, bestStreak:0, bestAttempts:999 };
+    const newStreak = won ? (prev.streak||0)+1 : 0;
+    lb[personal.playerName] = {
+      wins: (prev.wins||0) + (won?1:0),
+      losses: (prev.losses||0) + (won?0:1),
+      streak: newStreak,
+      bestStreak: Math.max(prev.bestStreak||0, newStreak),
+      bestAttempts: won ? Math.min(prev.bestAttempts||999, guesses.length) : (prev.bestAttempts||999)
+    };
+  });
   if(ok){
     myEndlessStats = endlessLb[personal.playerName];
     recordingState = 'done';
